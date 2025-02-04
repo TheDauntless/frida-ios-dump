@@ -5,12 +5,12 @@ Supports 2.x and 3.x
 
 ## Usage
 
- 1. Install Frida package on a jailbroken device via a packet manager. See [documentation](https://frida.re/docs/ios/).
+ 1. Install `Frida` package on a jailbroken device via a packet manager. See [documentation](https://frida.re/docs/ios/).
  2. Setup SSH forwarding over USB (Default 2222 -> 22)
     2.1 Install `usbmuxd`, `iproxy`
     2.2 Run `usbmuxd` as a systemd service (`sudo systemctl start usbmuxd`) or from a terminal (`sudo usbmuxd -f -p`)
     2.3 `iproxy 2222 22`
- 3. Run `./dump.py <Display name or Bundle identifier>
+ 3. Run `./dump.py` <Display name or Bundle identifier>
 
 For SSH/SCP make sure you have your public key added to the target device's `~/.ssh/authorized_keys` file.
 
