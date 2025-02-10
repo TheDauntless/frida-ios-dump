@@ -10,7 +10,8 @@ Supports 2.x and 3.x
     2.1 Install `usbmuxd`, `iproxy`
     2.2 Run `usbmuxd` as a systemd service (`sudo systemctl start usbmuxd`) or from a terminal (`sudo usbmuxd -f -p`)
     2.3 `iproxy 2222 22`
- 3. Run `./dump.py <Display name or Bundle identifier>`
+ 3. Run `frida-ps -Us` to list existing apps and find your app.
+ 4. Run `./dump.py <Display name or Bundle identifier>`
 
 For SSH/SCP make sure you have your public key added to the target device's `~/.ssh/authorized_keys` file.
 
@@ -49,6 +50,10 @@ Drag to [MonkeyDev](https://github.com/AloneMonkey/MonkeyDev), Happy hacking!
 
 Check if the app is in execution and close it.
 
+### "unexpected error while resuming process: (os/kern) failure"
+
+Open the application before dumping.
+
 ### `dump.py` causes device to rebbot, lost connection, or unexpected error while probing dyld of target process
 
-Please open the application before dumping.
+Open the application before dumping.
