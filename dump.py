@@ -250,7 +250,7 @@ def create_dir(path):
         print(err)
 
 
-def open_target_app(device, name_or_bundleid):
+def open_target_app(device, name_or_bundleid, pause):
     print('Start the target app {}'.format(name_or_bundleid))
 
     pid = ''
@@ -267,7 +267,8 @@ def open_target_app(device, name_or_bundleid):
         if not pid:
             pid = device.spawn([bundle_identifier])
             session = device.attach(pid)
-            device.resume(pid)
+            if not pause:
+                device.resume(pid)
         else:
             session = device.attach(pid)
     except Exception as e:
@@ -298,6 +299,8 @@ if __name__ == '__main__':
     parser.add_argument('-u', '--user', dest='ssh_user', help='Specify SSH username')
     parser.add_argument('-P', '--password', dest='ssh_password', help='Specify SSH password')
     parser.add_argument('-K', '--key_filename', dest='ssh_key_filename', help='Specify SSH private key file path')
+    parser.add_argument('-p', '--pause', dest='pause', help='Pause app after launch')
+
     parser.add_argument('target', nargs='?', help='Bundle identifier or display name of the target app')
 
     args = parser.parse_args()
@@ -334,7 +337,7 @@ if __name__ == '__main__':
             ssh.connect(Host, port=Port, username=User, password=Password, key_filename=KeyFileName)
 
             create_dir(PAYLOAD_PATH)
-            (session, display_name, bundle_identifier) = open_target_app(device, name_or_bundleid)
+            (session, display_name, bundle_identifier) = open_target_app(device, name_or_bundleid, args.pause)
             if output_ipa is None:
                 output_ipa = display_name
             output_ipa = re.sub("\\.ipa$", '', output_ipa)
