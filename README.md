@@ -45,11 +45,13 @@ Generating Aftenposten.ipa
 Done.
 ```
 
-Congratulations!!! You've got a decrypted IPA file.
-
 Drag to [MonkeyDev](https://github.com/AloneMonkey/MonkeyDev), Happy hacking!
 
 ## Troubleshooting
+
+### App crashes before dump can be made
+
+Use `-p` argument to pause the application when launching.
 
 ### "Timeout was reached"
 
