@@ -11,7 +11,6 @@ import frida
 import threading
 import os
 import shutil
-import time
 import argparse
 import tempfile
 import subprocess
@@ -21,6 +20,8 @@ from paramiko import SSHClient
 from scp import SCPClient
 from tqdm import tqdm
 import traceback
+import itertools
+import time
 
 VERSION = "3.0"
 
@@ -46,7 +47,15 @@ file_dict = {}
 
 finished = threading.Event()
 
-
+def log(msg):
+    print("\033[92m[+]\033[0m " + msg)
+def logError(msg):
+    print("\033[91m[-]\033[0m " + str(msg))
+def logWarn(msg):
+    print("\033[93m[!]\033[0m " + msg)
+def logVerbose(msg):
+    if VERBOSE:
+        print("\033[94m[ ]\033[0m " + msg)
 def get_usb_iphone():
     Type = 'usb'
     if int(frida.__version__.split('.')[0]) < 12:
@@ -63,7 +72,7 @@ def get_usb_iphone():
     while device is None:
         devices = [dev for dev in device_manager.enumerate_devices() if dev.type == Type]
         if len(devices) == 0:
-            print('Waiting for USB device...')
+            logWarn('Waiting for USB device...')
             changed.wait()
         else:
             device = devices[0]
@@ -76,7 +85,7 @@ def get_usb_iphone():
 def generate_ipa(path, display_name):
     ipa_filename = display_name + '.ipa'
 
-    print('Generating "{}"'.format(ipa_filename))
+    log('Generating "{}"'.format(ipa_filename))
     try:
         app_name = file_dict['app']
 
@@ -91,31 +100,33 @@ def generate_ipa(path, display_name):
         subprocess.check_call(zip_args, cwd=TEMP_DIR)
         shutil.rmtree(PAYLOAD_PATH)
     except Exception as e:
-        print(e)
+        logError(e)
         finished.set()
 
-t = None;
+progressBar = None;
+currentFile = ''
+bar_fmt = "\033[92m[+]\033[0m {percentage:3.0f}% | {desc}"
 
+spinner = ['-', '\\', '|', '/']
 def on_message(message, data):
-    global t
-    if VERBOSE:
-        print(message)
+
+    global progressBar
+    global currentFile
+
     last_sent = [0]
 
     def progress(filename, size, sent):
-        baseName = os.path.basename(filename)
-        # print(filename, size, sent)
-        if IS_PY2 or isinstance(baseName, bytes):
-            t.desc = baseName.decode("utf-8")
-        else:
-            t.desc = baseName
-        t.total = size
-        t.update(sent - last_sent[0])
+        progressBar.desc = currentFile
+        progressBar.total = size
+        progressBar.update(sent - last_sent[0])
         last_sent[0] = 0 if size == sent else sent
+    def progressPulse(filename, size, sent):
+
+        # print(spinner[int(time.time()) % 4])
+        progressBar.desc = f"\033[92m[{spinner[int(time.time()) % 4]}]\033[0m {currentFile}"
+        progressBar.update(0)
 
     if 'payload' in message:
-        if t is None:
-            t = tqdm(unit='B',unit_scale=True,unit_divisor=1024,miniters=1)
         payload = message['payload']
         if 'dump' in payload:
 
@@ -125,6 +136,9 @@ def on_message(message, data):
             scp_from = dump_path
             scp_to = PAYLOAD_PATH + '/'
 
+            progressBar = tqdm(unit='B',unit_scale=True,unit_divisor=1024,miniters=1,bar_format=bar_fmt)
+
+            currentFile = origin_path.split(".app/")[1]
             with SCPClient(ssh.get_transport(), progress = progress, socket_timeout = 60) as scp:
                 scp.get(scp_from, scp_to)
 
@@ -133,7 +147,7 @@ def on_message(message, data):
             try:
                 subprocess.check_call(chmod_args)
             except subprocess.CalledProcessError as err:
-                print(err)
+                logError(err)
 
             index = origin_path.find('.app/')
             file_dict[os.path.basename(dump_path)] = origin_path[index + 5:]
@@ -143,7 +157,9 @@ def on_message(message, data):
 
             scp_from = app_path
             scp_to = PAYLOAD_PATH + '/'
-            with SCPClient(ssh.get_transport(), progress = progress, socket_timeout = 60) as scp:
+            currentFile = "Downloading App Bundle"
+            progressBar = tqdm(total=None,bar_format="{desc}")
+            with SCPClient(ssh.get_transport(), progress = progressPulse, socket_timeout = 60) as scp:
                 scp.get(scp_from, scp_to, recursive=True)
 
             chmod_dir = os.path.join(PAYLOAD_PATH, os.path.basename(app_path))
@@ -151,14 +167,22 @@ def on_message(message, data):
             try:
                 subprocess.check_call(chmod_args)
             except subprocess.CalledProcessError as err:
-                print(err)
+                logError(err)
 
             file_dict['app'] = os.path.basename(app_path)
 
+        if 'log' in payload:
+            log(payload['log'])
+        if 'error' in payload:
+            logError(payload['error'])
+        if 'verbose' in payload:
+            logVerbose(payload['verbose'])
+        if 'warn' in payload:
+            logWarn(payload['warn'])
         if 'done' in payload:
             finished.set()
-    if t is not None:
-        t.close()
+    if progressBar is not None:
+        progressBar.close()
 
 def compare_applications(a, b):
     a_is_running = a.pid != 0
@@ -259,7 +283,7 @@ def create_dir(path):
     try:
         os.makedirs(path)
     except os.error as err:
-        print(err)
+        logError(err)
 
 
 def open_target_app(device, name_or_bundleid, wait):
@@ -282,7 +306,7 @@ def open_target_app(device, name_or_bundleid, wait):
         sys.exit('No matching application found')
 
     if len(matches) > 1:
-        print('Multiple matching applications found:')
+        logWarn('Multiple matching applications found:')
         for i in range(0, len(matches)):
             print('  [{}] {} ({})'.format(i, matches[i]['name'], matches[i]['identifier']))
         index = -1
@@ -298,20 +322,21 @@ def open_target_app(device, name_or_bundleid, wait):
     pid = match['pid']
     display_name = match['name']
     bundle_identifier = match['identifier']
-    print('Target application: {} ({})'.format(display_name, bundle_identifier))
+    log('Target application: {} ({}) - {}'.format(display_name, bundle_identifier, pid))
 
     try:
         if not pid:
-            print("Not running, launching...")
+            log("Not running, launching...")
             pid = device.spawn([bundle_identifier])
             session = device.attach(pid)
             if not wait:
                 device.resume(pid)
+            log("Launched, pid={}".format(pid))
         else:
-            print("Already running, attaching...")
+            logWarn("Already running, attaching...")
             session = device.attach(pid)
     except Exception as e:
-        print(e)
+        logError(e)
 
 
     return session, display_name, bundle_identifier, pid
@@ -319,7 +344,7 @@ def open_target_app(device, name_or_bundleid, wait):
 
 def start_dump(session, ipa_name):
     if VERBOSE:
-        print('Dumping {} to {}'.format(display_name, TEMP_DIR))
+        logVerbose('Dumping {} to {}'.format(display_name, TEMP_DIR))
 
     script = load_js_file(session, DUMP_JS)
     script.post({"type": "dump"})
@@ -348,6 +373,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     exit_code = 0
+    VERBOSE = args.verbose
     ssh = None
 
     if not len(sys.argv[1:]):
@@ -384,18 +410,18 @@ if __name__ == '__main__':
             output_ipa = re.sub("\\.ipa$", '', output_ipa)
             if session:
                 start_dump(session, output_ipa)
-                print("Done, resuming application")
+                log("Done, resuming application")
                 device.resume(pid)
         except paramiko.ssh_exception.NoValidConnectionsError as e:
-            print(e)
-            print('Try specifying -H/--hostname and/or -p/--port')
+            logError(e)
+            logError('Try specifying -H/--hostname and/or -p/--port')
             exit_code = 1
         except paramiko.AuthenticationException as e:
-            print(e)
-            print('Try specifying -u/--username and/or -P/--password')
+            logError(e)
+            logError('Try specifying -u/--username and/or -P/--password')
             exit_code = 1
         except Exception as e:
-            print('*** Caught exception: %s: %s' % (e.__class__, e))
+            logError('*** Caught exception: %s: %s' % (e.__class__, e))
             traceback.print_exc()
             exit_code = 1
 

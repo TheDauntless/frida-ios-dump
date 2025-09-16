@@ -110,20 +110,20 @@ function getExportFunction(type, name, ret, args) {
     var nptr;
     nptr = Module.getGlobalExportByName(name);
     if (nptr === null) {
-        log("cannot find " + name);
+        error("cannot find " + name);
         return null;
     } else {
         if (type === "f") {
             var funclet = new NativeFunction(nptr, ret, args);
             if (typeof funclet === "undefined") {
-                log("parse error " + name);
+                error("parse error " + name);
                 return null;
             }
             return funclet;
         } else if (type === "d") {
             var datalet = nptr.readPointer();
             if (typeof datalet === "undefined") {
-                log("parse error " + name);
+                error("parse error " + name);
                 return null;
             }
             return datalet;
@@ -142,7 +142,7 @@ var access = getExportFunction("f", "access", "int", ["pointer", "int"]);
 var dlopen = getExportFunction("f", "dlopen", "pointer", ["pointer", "int"]);
 
 function getDocumentDir() {
-    return Process.getHomeDir()
+    return Path.join(Process.getHomeDir(), "Documents")
 }
 
 function open(pathname, flags, mode) {
@@ -202,13 +202,13 @@ function dumpModule(name) {
         }
     }
     if (targetmod == null) {
-        log("Cannot find module");
+        error("Cannot find module");
         return;
     }
     var modbase = modules[i].base;
     var modsize = modules[i].size;
     var newmodname = modules[i].name;
-    var newmodpath = getDocumentDir() + "/" + newmodname + ".fid";
+    var newmodpath = getDocumentDir() + "/" + newmodname + ".decrypted";
     var oldmodpath = modules[i].path;
 
 
@@ -216,11 +216,15 @@ function dumpModule(name) {
         remove(allocStr(newmodpath));
     }
 
-    var fmodule = open(newmodpath, O_CREAT | O_RDWR, 0);
+    var fmodule = open(newmodpath, O_CREAT | O_RDWR, 0o600);
     var foldmodule = open(oldmodpath, O_RDONLY, 0);
 
-    if (fmodule == -1 || foldmodule == -1) {
-        log("Cannot open file" + newmodpath);
+    if (fmodule == -1 ) {
+        error("Cannot open target file: " + newmodpath);
+        return;
+    }
+    if(foldmodule == -1){
+        error("Cannot open original file: " + oldmodpath);
         return;
     }
 
@@ -312,48 +316,17 @@ function dumpModule(name) {
     return newmodpath
 }
 
-function cleanRecursive(dir: string): void {
-    let entries: Fs.DirectoryEntry[];
-    try {
-        entries = Fs.list(dir);
-    } catch {
-        return; // dir doesn't exist; nothing to clean
-    }
-
-    for (const entry of entries) {
-        // prevent infinite loops / climbing up the tree
-        if (entry.name === "." || entry.name === "..") continue;
-
-        const p = Path.join(dir, entry.name);
-
-        // If frida-fs reports symlink, remove it as a file (don't recurse into it)
-        if (entry.type === Fs.constants.DT_LNK) {
-            try { Fs.unlinkSync(p); } catch {}
-            continue;
-        }
-
-        if (entry.type === Fs.constants.DT_DIR) {
-            // Recurse into child dir
-            cleanRecursive(p);
-            // Then remove the now-empty dir
-            try { Fs.rmdirSync(p); } catch {}
-        } else {
-            // Regular file (or other non-dir): unlink it
-            try { Fs.unlinkSync(p); } catch {}
-        }
-    }
-}
 function ensureLoaded(moduleName, path) {
     const module = Process.findModuleByName(moduleName)
     if (module) {
-        log("[frida-ios-dump]: " + moduleName + " is loaded. ");
+        verbose("[frida-ios-dump]: " + moduleName + " is loaded. ");
         return
     } else {
         Module.load(path)
         if (Process.findModuleByName(moduleName)) {
-            log("[frida-ios-dump]: " + moduleName + " has been loaded forcefully.");
+            warn("[frida-ios-dump]: " + moduleName + " has been loaded forcefully.");
         } else {
-            log("[frida-ios-dump]: " + moduleName + " has not been loaded.");
+            warn("[frida-ios-dump]: " + moduleName + " has not been loaded.");
         }
     }
 }
@@ -379,7 +352,16 @@ function loadAllDynamicLibrary(app_path) {
     }
 }
 function log(msg) {
-    send({type: "log", payload: msg});
+    send({ "log": msg});
+}
+function error(msg) {
+    send({"error": msg});
+}
+function warn(msg) {
+    send({"warn": msg});
+}
+function verbose(msg) {
+    send({ "verbose": msg});
 }
 
 (globalThis as any).dumpIPA = dumpIPA;
@@ -391,25 +373,27 @@ function dumpCommand(message) {
 
 function dumpIPA(){
     modules = getAllAppModules();
-    
+
     const mainModule = Process.mainModule;
     if (!mainModule) {
-        log("[-] Could not find Process.mainModule");
+        error("[-] Could not find Process.mainModule");
         return;
     }
 
     // Source: App bundle directory
     const bundleBinaryPath = mainModule.path;
     const appDir = Path.dirname(bundleBinaryPath);
-    log("[*] App bundle directory: " + appDir);
+    verbose("App bundle directory: " + appDir);
 
 
     loadAllDynamicLibrary(appDir);
-    log( modules)
+
     // start dump
     modules = getAllAppModules();
+
+    log("Dumping binaries")
     for (var i = 0; i  < modules.length; i++) {
-        log("start dump " + modules[i].path);
+        verbose("\t" + modules[i].path.substring(appDir.length));
         var result = dumpModule(modules[i].path);
         send({ dump: result, path: modules[i].path});
     }

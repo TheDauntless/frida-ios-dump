@@ -74,19 +74,20 @@ npm run build
 ## Example usage
 
 ```sh
-./dump.py -w sto
-Multiple matching applications found:
-  [0] Sileo (org.coolstar.SileoStore)
-  [1] Stocks (com.apple.stocks)
-  [2] TrollStore (com.opa334.TrollStore)
-  [3] iTunes Store (com.apple.MobileStore)
-  [4] App Store (com.apple.AppStore)
+python3 dump.py -w google
+[!] Multiple matching applications found:
+  [0] Google Maps (com.google.Maps)
+  [1] Gmail (com.google.Gmail)
 Select an application by index: 1
-Target application: Stocks (com.apple.stocks)
-Already running, attaching...
-0.00B [00:00, ?B/s]
-Generating "Stocks.ipa"
-Done, resuming application
+[+] Target application: Gmail (com.google.Gmail) - 0
+[+] Not running, launching...
+[+] Launched, pid=5481
+[+] Dumping binaries
+[+] 100% | Gmail
+[+] 100% | Frameworks/AppAndExtensionsFramework.framework/AppAndExtensionsFramework
+[\] Downloading App Bundle
+[+] Generating "Gmail.ipa"
+[+] Done, resuming application
 ```
 
 ## Troubleshooting
@@ -98,6 +99,10 @@ Use `-w` argument to pause the application when launching.
 ### "Timeout was reached"
 
 Close the application. Sometimes an application is running even if it's not listed in the app switcher. In that case, use `kill <pid>` via SSH.
+
+### TransportError: The connection is closed
+
+Use `-w` argument to pause the application when launching.
 
 ## Credits
 
