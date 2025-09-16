@@ -1,51 +1,93 @@
 # frida-ios-dump
+
 Pull a decrypted IPA from a jailbroken device
 
-Supports 2.x and 3.x
+## Features
+
+* Fuzzy matching on Bundle ID or App Name
+* Possibility to pause app after launch
+* Creates entire IPA file
+* No reliance on ObjC API
+
+## Requirements
+
+* Frida 17.x+
 
 ## Usage
 
 1. Install `Frida` package on a jailbroken device via a package manager. See [documentation](https://frida.re/docs/ios/).
-2. Set up SSH forwarding over USB (Default 2222 -> 22)
+2. (optional) Set up SSH forwarding over USB (Default 2222 -> 22). If not, specify SSH configuration when running `dump.py`
     1. Install `usbmuxd`, `iproxy`
     2. Run `usbmuxd` as a systemd service (`sudo systemctl start usbmuxd`) or from a terminal (`sudo usbmuxd -f -p`)
     3. `iproxy 2222 22`
-4. Run `frida-ps -Us` to list existing apps and find your app.
-5. Run `./dump.py <Display name or Bundle identifier>`
+4. Run `./dumpy.py -l` to view all apps
+5. Run `./dump.py <query>`
+   1. Run `./dump.py -w <query>` to have the application pause at startup
 
-For SSH/SCP make sure you have your public key added to the target device's `~/.ssh/authorized_keys` file or use username/password
+## CLI
 
-Alternatively, connect directly over SSH:
+The script defaults to a connection on root@localhost:2222 but can be configured using `-H`, `-p`, `-u` and `-P`
+
+```code
+python3 dump.py -h
+usage: dump.py [-h] [-l] [-o OUTPUT_IPA] [-H SSH_HOST] [-p SSH_PORT] [-u SSH_USER] [-P SSH_PASSWORD] [-K SSH_KEY_FILENAME] [-w] [-v] [target]
+
+frida-ios-dump v3.0 - Decrypt iOS applications on non-jailbroken devices using Frida
+
+positional arguments:
+  target                Bundle identifier or display name of the target app
+
+options:
+  -h, --help            show this help message and exit
+  -l, --list            List the installed apps
+  -o, --output OUTPUT_IPA
+                        Specify name of the decrypted IPA
+  -H, --host SSH_HOST   Specify SSH hostname
+  -p, --port SSH_PORT   Specify SSH port
+  -u, --user SSH_USER   Specify SSH username
+  -P, --password SSH_PASSWORD
+                        Specify SSH password
+  -K, --key_filename SSH_KEY_FILENAME
+                        Specify SSH private key file path
+  -w, --wait            Pause app after launch
+  -v, --verbose         Enable verbose output
 ```
+
+Connecting over different SSH configuration:
+
+```code
 python3 dump.py -H <ip> -p 22 -u mobile -P 'alpine' <bundleid>
 ```
 
-```sh
-$ ./dump.py Aftenposten
-Start the target app Aftenposten
-Dumping Aftenposten to /var/folders/wn/9v1hs8ds6nv_xj7g95zxyl140000gn/T
-start dump /var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/AftenpostenApp
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/AFNetworking.framework/AFNetworking
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/ATInternet_iOS_ObjC_SDK.framework/ATInternet_iOS_ObjC_SDK
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/SPTEventCollector.framework/SPTEventCollector
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/SPiDSDK.framework/SPiDSDK
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftCore.dylib
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftCoreData.dylib
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftCoreGraphics.dylib
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftCoreImage.dylib
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftCoreLocation.dylib
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftDarwin.dylib
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftDispatch.dylib
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftFoundation.dylib
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftObjectiveC.dylib
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftQuartzCore.dylib
-start dump /private/var/containers/Bundle/Application/66423A80-0AFE-471C-BC9B-B571107D3C27/AftenpostenApp.app/Frameworks/libswiftUIKit.dylib
-Generating Aftenposten.ipa
+For SSH/SCP make sure you have your public key added to the target device's `~/.ssh/authorized_keys` file or use username/password
 
-Done.
+## Development
+
+```bash
+pip3 install -r requirements.txt
+npm install --save-dev @types/frida-gum
+frida-pm install frida-fs
+npm run build
+./dump.py <bundleid>
 ```
 
-Drag to [MonkeyDev](https://github.com/AloneMonkey/MonkeyDev), Happy hacking!
+## Example usage
+
+```sh
+./dump.py -w sto
+Multiple matching applications found:
+  [0] Sileo (org.coolstar.SileoStore)
+  [1] Stocks (com.apple.stocks)
+  [2] TrollStore (com.opa334.TrollStore)
+  [3] iTunes Store (com.apple.MobileStore)
+  [4] App Store (com.apple.AppStore)
+Select an application by index: 1
+Target application: Stocks (com.apple.stocks)
+Already running, attaching...
+0.00B [00:00, ?B/s]
+Generating "Stocks.ipa"
+Done, resuming application
+```
 
 ## Troubleshooting
 
@@ -55,12 +97,8 @@ Use `-w` argument to pause the application when launching.
 
 ### "Timeout was reached"
 
-Check if the app is in execution and close it.
+Close the application. Sometimes an application is running even if it's not listed in the app switcher. In that case, use `kill <pid>` via SSH.
 
-### "unexpected error while resuming process: (os/kern) failure"
+## Credits
 
-Open the application before dumping.
-
-### `dump.py` causes device to rebbot, lost connection, or unexpected error while probing dyld of target process
-
-Open the application before dumping.
+Original author / repo: [https://github.com/AloneMonkey/frida-ios-dump](AloneMonkey/frida-ios-dump)

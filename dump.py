@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Author : AloneMonkey
-# blog: www.alonemonkey.com
+# Original Author : AloneMonkey (www.alonemonkey.com)
 
 from __future__ import print_function
 from __future__ import unicode_literals
@@ -23,12 +22,14 @@ from scp import SCPClient
 from tqdm import tqdm
 import traceback
 
+VERSION = "3.0"
+
 IS_PY2 = sys.version_info[0] < 3
 if IS_PY2:
     reload(sys)
     sys.setdefaultencoding('utf8')
 
-script_dir = os.path.dirname(os.path.realpath(__file__))  + '/dist/'
+script_dir = os.path.dirname(os.path.realpath(__file__))  + '/dist'
 
 DUMP_JS = os.path.join(script_dir, 'dump.js')
 
@@ -93,12 +94,17 @@ def generate_ipa(path, display_name):
         print(e)
         finished.set()
 
+t = None;
+
 def on_message(message, data):
-    t = tqdm(unit='B',unit_scale=True,unit_divisor=1024,miniters=1)
+    global t
+    if VERBOSE:
+        print(message)
     last_sent = [0]
 
     def progress(filename, size, sent):
         baseName = os.path.basename(filename)
+        # print(filename, size, sent)
         if IS_PY2 or isinstance(baseName, bytes):
             t.desc = baseName.decode("utf-8")
         else:
@@ -108,8 +114,11 @@ def on_message(message, data):
         last_sent[0] = 0 if size == sent else sent
 
     if 'payload' in message:
+        if t is None:
+            t = tqdm(unit='B',unit_scale=True,unit_divisor=1024,miniters=1)
         payload = message['payload']
         if 'dump' in payload:
+
             origin_path = payload['path']
             dump_path = payload['dump']
 
@@ -148,7 +157,8 @@ def on_message(message, data):
 
         if 'done' in payload:
             finished.set()
-    t.close()
+    if t is not None:
+        t.close()
 
 def compare_applications(a, b):
     a_is_running = a.pid != 0
@@ -197,6 +207,7 @@ def cmp_to_key(mycmp):
 def get_applications(device):
     try:
         applications = device.enumerate_applications()
+
     except Exception as e:
         sys.exit('Failed to enumerate applications: %s' % e)
 
@@ -232,6 +243,7 @@ def load_js_file(session, filename):
     source = ''
     with codecs.open(filename, 'r', 'utf-8') as f:
         source = source + f.read()
+
     script = session.create_script(source)
     script.on('message', on_message)
     script.load()
@@ -251,37 +263,66 @@ def create_dir(path):
 
 
 def open_target_app(device, name_or_bundleid, wait):
-    print('Start the target app {}'.format(name_or_bundleid))
 
     pid = ''
     session = None
     display_name = ''
     bundle_identifier = ''
+    matches = []
+    match = {}
     for application in get_applications(device):
         if name_or_bundleid == application.identifier or name_or_bundleid == application.name:
-            pid = application.pid
-            display_name = application.name
-            bundle_identifier = application.identifier
+            # Exact match, take this one
+            match = {'pid': application.pid, 'name': application.name, 'identifier': application.identifier}
+            break
+        elif name_or_bundleid.lower() in application.identifier.lower() or name_or_bundleid.lower() in application.name.lower():
+            matches.append({'pid': application.pid, 'name': application.name, 'identifier': application.identifier})
+
+    if len(matches) == 0:
+        sys.exit('No matching application found')
+
+    if len(matches) > 1:
+        print('Multiple matching applications found:')
+        for i in range(0, len(matches)):
+            print('  [{}] {} ({})'.format(i, matches[i]['name'], matches[i]['identifier']))
+        index = -1
+        while index < 0 or index >= len(matches):
+            selection = input('Select an application by index: ')
+            try:
+                index = int(selection)
+            except ValueError:
+                pass
+        match = matches[index]
+    else:
+        match = matches[0]
+    pid = match['pid']
+    display_name = match['name']
+    bundle_identifier = match['identifier']
+    print('Target application: {} ({})'.format(display_name, bundle_identifier))
 
     try:
         if not pid:
+            print("Not running, launching...")
             pid = device.spawn([bundle_identifier])
             session = device.attach(pid)
             if not wait:
                 device.resume(pid)
         else:
+            print("Already running, attaching...")
             session = device.attach(pid)
     except Exception as e:
-        print(e) 
+        print(e)
 
-    return session, display_name, bundle_identifier
+
+    return session, display_name, bundle_identifier, pid
 
 
 def start_dump(session, ipa_name):
-    print('Dumping {} to {}'.format(display_name, TEMP_DIR))
+    if VERBOSE:
+        print('Dumping {} to {}'.format(display_name, TEMP_DIR))
 
     script = load_js_file(session, DUMP_JS)
-    script.post('dump')
+    script.post({"type": "dump"})
     finished.wait()
 
     generate_ipa(PAYLOAD_PATH, ipa_name)
@@ -289,9 +330,9 @@ def start_dump(session, ipa_name):
     if session:
         session.detach()
 
-
+VERBOSE=False
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='frida-ios-dump (by AloneMonkey v2.0)')
+    parser = argparse.ArgumentParser(description='frida-ios-dump v' + VERSION + ' - Decrypt iOS applications on non-jailbroken devices using Frida',)
     parser.add_argument('-l', '--list', dest='list_applications', action='store_true', help='List the installed apps')
     parser.add_argument('-o', '--output', dest='output_ipa', help='Specify name of the decrypted IPA')
     parser.add_argument('-H', '--host', dest='ssh_host', help='Specify SSH hostname')
@@ -299,7 +340,8 @@ if __name__ == '__main__':
     parser.add_argument('-u', '--user', dest='ssh_user', help='Specify SSH username')
     parser.add_argument('-P', '--password', dest='ssh_password', help='Specify SSH password')
     parser.add_argument('-K', '--key_filename', dest='ssh_key_filename', help='Specify SSH private key file path')
-    parser.add_argument('-w', '--wait', dest='wait', help='Pause app after launch')
+    parser.add_argument('-w', '--wait', action='store_true', dest='wait', help='Pause app after launch')
+    parser.add_argument('-v', '--verbose', action='store_true', dest='verbose', help='Enable verbose output')
 
     parser.add_argument('target', nargs='?', help='Bundle identifier or display name of the target app')
 
@@ -335,14 +377,15 @@ if __name__ == '__main__':
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             ssh.connect(Host, port=Port, username=User, password=Password, key_filename=KeyFileName)
-
             create_dir(PAYLOAD_PATH)
-            (session, display_name, bundle_identifier) = open_target_app(device, name_or_bundleid, args.wait)
+            (session, display_name, bundle_identifier, pid) = open_target_app(device, name_or_bundleid, args.wait)
             if output_ipa is None:
                 output_ipa = display_name
             output_ipa = re.sub("\\.ipa$", '', output_ipa)
             if session:
                 start_dump(session, output_ipa)
+                print("Done, resuming application")
+                device.resume(pid)
         except paramiko.ssh_exception.NoValidConnectionsError as e:
             print(e)
             print('Try specifying -H/--hostname and/or -p/--port')

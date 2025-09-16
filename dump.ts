@@ -1,5 +1,6 @@
-// Module.ensureInitialized('Foundation');
-import ObjC from "frida-objc-bridge";
+import * as Fs from "frida-fs";
+import * as Path from "path";
+
 
 var O_RDONLY = 0;
 var O_WRONLY = 1;
@@ -109,20 +110,20 @@ function getExportFunction(type, name, ret, args) {
     var nptr;
     nptr = Module.getGlobalExportByName(name);
     if (nptr === null) {
-        console.log("cannot find " + name);
+        log("cannot find " + name);
         return null;
     } else {
         if (type === "f") {
             var funclet = new NativeFunction(nptr, ret, args);
             if (typeof funclet === "undefined") {
-                console.log("parse error " + name);
+                log("parse error " + name);
                 return null;
             }
             return funclet;
         } else if (type === "d") {
             var datalet = nptr.readPointer();
             if (typeof datalet === "undefined") {
-                console.log("parse error " + name);
+                log("parse error " + name);
                 return null;
             }
             return datalet;
@@ -141,10 +142,7 @@ var access = getExportFunction("f", "access", "int", ["pointer", "int"]);
 var dlopen = getExportFunction("f", "dlopen", "pointer", ["pointer", "int"]);
 
 function getDocumentDir() {
-    var NSDocumentDirectory = 9;
-    var NSUserDomainMask = 1;
-    var npdirs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, 1);
-    return new ObjC.Object(npdirs).objectAtIndex_(0).toString();
+    return Process.getHomeDir()
 }
 
 function open(pathname, flags, mode) {
@@ -204,7 +202,7 @@ function dumpModule(name) {
         }
     }
     if (targetmod == null) {
-        console.log("Cannot find module");
+        log("Cannot find module");
         return;
     }
     var modbase = modules[i].base;
@@ -222,7 +220,7 @@ function dumpModule(name) {
     var foldmodule = open(oldmodpath, O_RDONLY, 0);
 
     if (fmodule == -1 || foldmodule == -1) {
-        console.log("Cannot open file" + newmodpath);
+        log("Cannot open file" + newmodpath);
         return;
     }
 
@@ -314,77 +312,110 @@ function dumpModule(name) {
     return newmodpath
 }
 
-function loadAllDynamicLibrary(app_path) {
-    var defaultManager = ObjC.classes.NSFileManager.defaultManager();
-    var errorPtr = Memory.alloc(Process.pointerSize); 
-    errorPtr.writePointer(NULL); 
-    var filenames = defaultManager.contentsOfDirectoryAtPath_error_(app_path, errorPtr);
-    for (var i = 0, l = filenames.count(); i < l; i++) {
-        var file_name = filenames.objectAtIndex_(i);
-        var file_path = app_path.stringByAppendingPathComponent_(file_name);
-        if (file_name.hasSuffix_(".framework")) {
-            var bundle = ObjC.classes.NSBundle.bundleWithPath_(file_path);
-            if (bundle.isLoaded()) {
-                console.log("[frida-ios-dump]: " + file_name + " has been loaded. ");
-            } else {
-                if (bundle.load()) {
-                    console.log("[frida-ios-dump]: Load " + file_name + " success. ");
-                } else {
-                    console.log("[frida-ios-dump]: Load " + file_name + " failed. ");
-                }
-            }
-        } else if (file_name.hasSuffix_(".bundle") || 
-                   file_name.hasSuffix_(".momd") ||
-                   file_name.hasSuffix_(".strings") ||
-                   file_name.hasSuffix_(".appex") ||
-                   file_name.hasSuffix_(".app") ||
-                   file_name.hasSuffix_(".lproj") ||
-                   file_name.hasSuffix_(".storyboardc")) {
-            continue;
-        } else {
-            var isDirPtr = Memory.alloc(Process.pointerSize);
-            isDirPtr.writePointer(NULL);
-            defaultManager.fileExistsAtPath_isDirectory_(file_path, isDirPtr);
-            if (isDirPtr.readPointer().equals(1)) {
-                loadAllDynamicLibrary(file_path);
-            } else {
-                if (file_name.hasSuffix_(".dylib")) {
-                    var is_loaded = 0;
-                    for (var j = 0; j < modules.length; j++) {
-                        if (modules[j].path.indexOf(file_name) != -1) {
-                            is_loaded = 1;
-                            console.log("[frida-ios-dump]: " + file_name + " has been dlopen.");
-                            break;
-                        }
-                    } 
+function cleanRecursive(dir: string): void {
+    let entries: Fs.DirectoryEntry[];
+    try {
+        entries = Fs.list(dir);
+    } catch {
+        return; // dir doesn't exist; nothing to clean
+    }
 
-                    if (!is_loaded) {
-                        if (dlopen(allocStr(file_path.UTF8String()), 9)) {
-                            console.log("[frida-ios-dump]: dlopen " + file_name + " success. ");
-                        } else {
-                            console.log("[frida-ios-dump]: dlopen " + file_name + " failed. ");
-                        }
-                    }
-                }
-            }
+    for (const entry of entries) {
+        // prevent infinite loops / climbing up the tree
+        if (entry.name === "." || entry.name === "..") continue;
+
+        const p = Path.join(dir, entry.name);
+
+        // If frida-fs reports symlink, remove it as a file (don't recurse into it)
+        if (entry.type === Fs.constants.DT_LNK) {
+            try { Fs.unlinkSync(p); } catch {}
+            continue;
+        }
+
+        if (entry.type === Fs.constants.DT_DIR) {
+            // Recurse into child dir
+            cleanRecursive(p);
+            // Then remove the now-empty dir
+            try { Fs.rmdirSync(p); } catch {}
+        } else {
+            // Regular file (or other non-dir): unlink it
+            try { Fs.unlinkSync(p); } catch {}
+        }
+    }
+}
+function ensureLoaded(moduleName, path) {
+    const module = Process.findModuleByName(moduleName)
+    if (module) {
+        log("[frida-ios-dump]: " + moduleName + " is loaded. ");
+        return
+    } else {
+        Module.load(path)
+        if (Process.findModuleByName(moduleName)) {
+            log("[frida-ios-dump]: " + moduleName + " has been loaded forcefully.");
+        } else {
+            log("[frida-ios-dump]: " + moduleName + " has not been loaded.");
         }
     }
 }
 
-function handleMessage(message) {
+
+function loadAllDynamicLibrary(app_path) {
+
+    let entries: Fs.DirectoryEntry[] = Fs.list(app_path)
+
+    for (const entry of entries) {
+
+        var file_name = entry.name
+        if (entry.name === "." || entry.name === "..") continue;
+
+        var file_path = Path.join(app_path, entry.name)
+        if (file_name.endsWith(".dylib") || entry.name.endsWith(".framework/")) {
+            ensureLoaded(entry.name, file_path)
+            file_name
+        }
+        else if (entry.type == Fs.constants.DT_DIR) {
+            loadAllDynamicLibrary(file_path);
+        }
+    }
+}
+function log(msg) {
+    send({type: "log", payload: msg});
+}
+
+(globalThis as any).dumpIPA = dumpIPA;
+
+function dumpCommand(message) {
+
+    dumpIPA()
+}
+
+function dumpIPA(){
     modules = getAllAppModules();
-    var app_path = ObjC.classes.NSBundle.mainBundle().bundlePath();
-    loadAllDynamicLibrary(app_path);
+    
+    const mainModule = Process.mainModule;
+    if (!mainModule) {
+        log("[-] Could not find Process.mainModule");
+        return;
+    }
+
+    // Source: App bundle directory
+    const bundleBinaryPath = mainModule.path;
+    const appDir = Path.dirname(bundleBinaryPath);
+    log("[*] App bundle directory: " + appDir);
+
+
+    loadAllDynamicLibrary(appDir);
+    log( modules)
     // start dump
     modules = getAllAppModules();
     for (var i = 0; i  < modules.length; i++) {
-        console.log("start dump " + modules[i].path);
+        log("start dump " + modules[i].path);
         var result = dumpModule(modules[i].path);
         send({ dump: result, path: modules[i].path});
     }
-    send({app: app_path.toString()});
+    send({app: appDir.toString()});
     send({done: "ok"});
-    recv(handleMessage);
+    // recv(handleMessage);
 }
 
-recv(handleMessage);
+recv('dump', dumpCommand);
