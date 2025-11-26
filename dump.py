@@ -297,7 +297,7 @@ def open_target_app(device, name_or_bundleid, wait):
     for application in get_applications(device):
         if name_or_bundleid == application.identifier or name_or_bundleid == application.name:
             # Exact match, take this one
-            match = {'pid': application.pid, 'name': application.name, 'identifier': application.identifier}
+            matches = [{'pid': application.pid, 'name': application.name, 'identifier': application.identifier}]
             break
         elif name_or_bundleid.lower() in application.identifier.lower() or name_or_bundleid.lower() in application.name.lower():
             matches.append({'pid': application.pid, 'name': application.name, 'identifier': application.identifier})
